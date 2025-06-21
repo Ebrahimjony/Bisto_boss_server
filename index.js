@@ -69,6 +69,11 @@ async function run() {
       const result = await menuCollection.find().toArray();
       res.send(result)
     });
+    app.post('/menu', veryfiToken,verifyAdmin, async(req,res)=>{
+      const addItem=req.body;
+      const result=await menuCollection.insertOne(addItem);
+      res.send(result)
+    })
 
     app.get('/reviews', async (req, res) => {
       const result = await reviewCollection.find().toArray();
