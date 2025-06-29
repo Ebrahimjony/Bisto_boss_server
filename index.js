@@ -2,6 +2,7 @@ const express = require('express')
 const jwt = require('jsonwebtoken')
 const app = express()
 require('dotenv').config()
+const stripe = require('stripe')(process.env.Stripe_Secret_key)
 const cors = require('cors')
 const port = process.env.PORT || 5000;
 
@@ -28,6 +29,7 @@ async function run() {
     const reviewCollection = client.db('bistroDB').collection('reviews');
     const cardCollection = client.db('bistroDB').collection('cards');
     const userCollection = client.db('bistroDB').collection('users');
+    const paymentCollection = client.db('bistroDB').collection('payment');
 
     //middleWare
     const veryfiToken = (req, res, next) => {
@@ -69,10 +71,23 @@ async function run() {
       const result = await menuCollection.find().toArray();
       res.send(result)
     });
-    app.post('/menu', veryfiToken,verifyAdmin, async(req,res)=>{
-      const addItem=req.body;
-      const result=await menuCollection.insertOne(addItem);
+    app.post('/menu', async (req, res) => {
+      const addItem = req.body;
+      const result = await menuCollection.insertOne(addItem);
       res.send(result)
+    })
+    app.delete('/menu/:id', async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) }
+      const result = await menuCollection.deleteOne(query);
+      res.send(result);
+    });
+    app.get('/menu/:id', async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) }
+      const result = await menuCollection.findOne(query);
+      res.send(result)
+
     })
 
     app.get('/reviews', async (req, res) => {
@@ -104,7 +119,7 @@ async function run() {
     });
 
     //users related api
-    app.get('/users', veryfiToken,verifyAdmin, async (req, res) => {
+    app.get('/users', veryfiToken, verifyAdmin, async (req, res) => {
       const result = await userCollection.find().toArray();
       res.send(result)
     });
@@ -154,6 +169,43 @@ async function run() {
       const result = await userCollection.deleteOne(query);
       res.send(result);
     });
+    //payment intents
+    app.post('/create-payment-intent', async (req, res) => {
+      const { price } = req.body;
+      const amount = parseInt(price * 100);
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: amount,
+        currency: 'usd',
+        payment_method_types: ['card']
+      })
+      res.send({
+        clientSecret: paymentIntent.client_secret
+      })
+    })
+
+    app.get('/payments/:email', veryfiToken, async (req, res) => {
+      const query = { email: req.params.email }
+
+      if (req.params.email !== res.decoded.email) {
+        return res.status(403).send({ message: 'forbidden access' })
+      }
+      const result = await paymentCollection.find(query).toArray();
+      res.send(result);
+    })
+
+    app.post('/payments', async (req, res) => {
+      const payment = req.body;
+      const paymentResult = await paymentCollection.insertOne(payment)
+      //carefuly delete each item from the card
+      const query = {
+        _id: {
+          $in: payment.cartIds.map(id => new ObjectId(id))
+        }
+      }
+      const deleteResult = await cardCollection.deleteMany(query)
+      console.log('id', payment)
+      res.send({ paymentResult, deleteResult })
+    })
 
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
